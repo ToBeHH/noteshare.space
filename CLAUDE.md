@@ -154,6 +154,33 @@ are allowed to reach a renderer. Two traps:
 - **`onParsed` must `await tick()`.** The renderer fires the callback from its own
   `$effect`, which can run before the parent's `bind:this={ref}` is assigned.
 
+## Wiki-link resolution
+
+Obsidian `[[...]]` links come in through the `internal-link` marked extension and are
+rendered by `src/lib/marked/renderers/InternalLink.svelte`:
+
+- `[[#Heading]]` / `[[#Heading|alias]]` point at a heading in **this** note, so they
+  render as working anchors that scroll to it.
+- `[[Other note]]` / `[[Other note#Heading]]` refer to a note that was never shared.
+  They stay inert, greyed out, with the `?` marker.
+
+Two things to keep in mind if you touch this:
+
+- **`headingSlug()` must be the only slugger.** `Heading.svelte` and
+  `InternalLink.svelte` are different components that have to agree on the same id, so
+  the slug has to be a *pure function of the text*. `github-slugger` (which the markdown
+  renderer uses for its own heading ids) appends `-1`/`-2` to repeats, which would make
+  the same heading text slug differently depending on what came before it.
+- **The click handler calls `preventDefault`, deliberately.** This page's URL fragment
+  carries the note's **decryption key** — letting the browser navigate to `#heading`
+  would replace it and break a reload. The same applies to any future in-page
+  navigation: never write to `location.hash` on a note page.
+
+Obsidian escapes the alias pipe as `\|` inside table cells, which `parseWikiLink()`
+un-escapes — that is where most of these links live in practice.
+
+Covered by `src/test/markdown/headingLinks.test.ts`.
+
 ## Security posture
 
 Production closure (`npm audit --omit=dev`), 2026-09-11:
