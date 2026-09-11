@@ -194,11 +194,22 @@ Two things that cost time to work out:
   `gh workflow run` tried to dispatch against `mcndt/noteshare.space` and 403'd.
   `gh repo set-default ToBeHH/noteshare.space` is set locally; pass
   `--repo ToBeHH/noteshare.space` if you are on another machine.
-- **There were 0 workflow runs for months** and it looked like fork Actions were
-  disabled. They weren't: the old `test.yaml` only triggered on `pull_request` (none
-  were ever opened) and the only push trigger was a `deploy.yaml` that called
-  *upstream's* reusable workflow and so could never start. Both are fixed; `deploy.yaml`
-  is gone, since deployment here is deliberately the manual `update.sh` on the server.
+- **⚠️ Push and pull_request triggers do not fire yet.** GitHub disables event-driven
+  workflows on forked repositories until someone clicks *"I understand my workflows, go
+  ahead and enable them"* once in the repo's **Actions** tab. There is no REST endpoint
+  for that switch — `actions/permissions` reporting `enabled: true` is a *different*
+  setting and does not cover it. `workflow_dispatch` goes through regardless, which is
+  how the workflow was verified green (run 34611937768, all four jobs passing). Until
+  that button is clicked, CI only runs when someone dispatches it:
+
+  ```bash
+  gh workflow run test.yaml --repo ToBeHH/noteshare.space --ref master
+  ```
+
+  The old workflows compounded this: `test.yaml` only triggered on `pull_request` (none
+  were ever opened) and the only push trigger was a `deploy.yaml` calling *upstream's*
+  reusable workflow, which could never start. `deploy.yaml` is gone — deployment here is
+  deliberately the manual `update.sh` on the server.
 
 Dependabot (`.github/dependabot.yml`) covers `/server`, `/webapp`, `/` and the actions
 themselves, with minor/patch grouped. Majors that have burned us are excluded on

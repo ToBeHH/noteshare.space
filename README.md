@@ -131,10 +131,13 @@ detail in **`CLAUDE.md`**. In outline:
 
 ## Security
 
-Both production dependency closures are at **0 known vulnerabilities**, and CI enforces
-it on every push (`npm audit --omit=dev --audit-level=high`). Audit the *production*
-closure; a full `npm audit` is mostly devDependency noise that `npm prune --omit=dev`
-strips out of the images.
+All three packages are at **0 known vulnerabilities**, in the full closure and not just
+production. CI has an audit job (`npm audit --omit=dev --audit-level=high`) to keep it
+that way.
+
+> Note: this is a fork, so GitHub will not run workflows on push or pull request until
+> they are enabled once from the repository's **Actions** tab. Until then CI only runs
+> via `gh workflow run test.yaml --ref master`.
 
 Dependabot is configured for `server/`, `webapp/`, the root tooling and the GitHub
 Actions themselves. Majors that have historically needed a human — Prisma, marked,
