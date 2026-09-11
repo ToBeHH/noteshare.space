@@ -60,6 +60,7 @@ lives at [mcndt/obsidian-quickshare](https://github.com/mcndt/obsidian-quickshar
   and silently unreadable notes.
 - Notes expire after 30 days, hardcoded as `EXPIRE_WINDOW_DAYS` in
   `server/src/controllers/note/note.post.controller.ts`.
+
 ## Stack
 
 Fully modernized 2026-09-11 off the EOL Node 16 / Alpine 3.16 base.
