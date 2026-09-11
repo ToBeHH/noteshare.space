@@ -181,12 +181,40 @@ un-escapes — that is where most of these links live in practice.
 
 Covered by `src/test/markdown/headingLinks.test.ts`.
 
+## CI and dependency updates
+
+`.github/workflows/test.yaml` runs on push to `master`, on PRs, and manually
+(`workflow_dispatch`): build + tests for both packages, plus an audit job that fails on
+`--omit=dev --audit-level=high`, so the zero-vulnerability state is a gate rather than a
+one-off.
+
+Two things that cost time to work out:
+
+- **`gh` defaults to the *upstream* repo here**, because this is a fork —
+  `gh workflow run` tried to dispatch against `mcndt/noteshare.space` and 403'd.
+  `gh repo set-default ToBeHH/noteshare.space` is set locally; pass
+  `--repo ToBeHH/noteshare.space` if you are on another machine.
+- **There were 0 workflow runs for months** and it looked like fork Actions were
+  disabled. They weren't: the old `test.yaml` only triggered on `pull_request` (none
+  were ever opened) and the only push trigger was a `deploy.yaml` that called
+  *upstream's* reusable workflow and so could never start. Both are fixed; `deploy.yaml`
+  is gone, since deployment here is deliberately the manual `update.sh` on the server.
+
+Dependabot (`.github/dependabot.yml`) covers `/server`, `/webapp`, `/` and the actions
+themselves, with minor/patch grouped. Majors that have burned us are excluded on
+purpose — Prisma (on-disk DateTime representation), marked (strikethrough parsing),
+svelte/kit/vite (move as a set). Dependabot **alerts** and **automated security fixes**
+had to be switched on explicitly; forks ship with them off.
+
 ## Security posture
 
-Production closure (`npm audit --omit=dev`), 2026-09-11:
+As of 2026-09-11, all three packages report **0 vulnerabilities** — in the full closure,
+not just production:
 
-- **server: 0 vulnerabilities**
-- **webapp: 0 vulnerabilities**
+- **root** (dev tooling): was 14 incl. 1 critical (`shell-quote` via `concurrently`)
+- **server**: 0
+- **webapp**: 0 — needed an `overrides` entry forcing `cookie` to 0.7.2, because
+  `@sveltejs/kit` pins an older one and npm's "fix" was to downgrade kit to 0.0.30
 
 Earlier rounds removed 3 criticals: `class-validator` (SQLi/XSS, reachable on every
 POST), `crypto-js` (weak PBKDF2), and the `tar` chain that came in via an **unused**
