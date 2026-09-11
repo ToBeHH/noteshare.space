@@ -1,14 +1,13 @@
 <script lang="ts">
-	// import { getContext } from 'svelte';
-	// import {  } from 'svelte-markdown';
+	import { headingSlug } from '$lib/util/headingSlug';
+
 	export let depth: number;
 	export let raw: string;
+	export let text = '';
 
-	// const { slug, getOptions } = getContext(key);
-	// const options = getOptions();
-
-	$: id = undefined;
-	// $: id = options.headerIds ? options.headerPrefix + slug(text) : undefined;
+	// Anchor target for Obsidian `[[#Heading]]` links. Must stay in sync with
+	// parseWikiLink() in InternalLink.svelte — both go through headingSlug().
+	$: id = headingSlug(text) || undefined;
 </script>
 
 <!-- h1-h4 is taken care of by Tailwind Typography plugin. -->
