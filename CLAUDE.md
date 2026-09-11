@@ -200,15 +200,29 @@ Things that will bite you:
 
 ### Verifying a change the way it actually ships
 
-A Mac has neither the right arch nor the right Node. Build in the production image:
+A Mac has the wrong Node and (usually) the wrong arch. Build in the production image:
 
 ```bash
 docker run --rm -v "$PWD/server:/app" -w /app node:24-slim sh -c \
-  "apt-get update && apt-get install -y python3 make g++ && npm ci && npx prisma generate && npm run build && npm test"
+  "apt-get update && apt-get install -y python3 make g++ && npm install && npx prisma generate && npm run build && npm test"
+
+docker run --rm -v "$PWD/webapp:/app" -w /app node:24-slim sh -c \
+  "npm install && npx svelte-kit sync && npx vitest run"
 ```
 
-For a full pre-merge check, push the branch and build it on the server against the real
-`/cloud/noteshare/build/*.Dockerfile` — that is what production uses.
+**On Apple Silicon, check the image arch first.** Production is amd64, so a cached
+`node:24-slim` can easily be the amd64 variant, which Docker Desktop then runs under
+Rosetta — `apt-get` plus a `better-sqlite3` compile that takes ~2 minutes natively runs
+for tens of minutes, with no error to explain it. The tell is `/run/rosetta/rosetta` in
+`docker top`.
+
+```bash
+docker image inspect node:24-slim --format '{{.Architecture}}'   # want arm64 locally
+docker pull --platform linux/arm64 node:24-slim
+```
+
+Test locally on arm64 for speed; do the final pre-merge check on the server, which is
+amd64 and builds against the real `/cloud/noteshare/build/*.Dockerfile`.
 
 ## Conventions
 
