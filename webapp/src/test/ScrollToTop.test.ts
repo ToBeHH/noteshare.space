@@ -1,7 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import ScrollToTop from '$lib/components/ScrollToTop.svelte';
+
+/**
+ * The button stays mounted and fades with CSS, so "hidden" is asserted as
+ * opacity-0 + inert (out of the tab order and the accessibility tree) rather
+ * than as absence from the DOM.
+ */
+function button(container: HTMLElement): HTMLButtonElement {
+	const el = container.querySelector<HTMLButtonElement>('button[aria-label="Scroll to top"]');
+	if (!el) throw new Error('scroll-to-top button not rendered');
+	return el;
+}
 
 /** happy-dom does not move window.scrollY on its own, so drive it directly. */
 async function scrollTo(y: number) {
@@ -11,46 +22,47 @@ async function scrollTo(y: number) {
 }
 
 describe('ScrollToTop', () => {
-	beforeEach(async () => {
+	beforeEach(() => {
 		Object.defineProperty(window, 'scrollY', { value: 0, writable: true, configurable: true });
 		window.matchMedia = vi.fn().mockReturnValue({ matches: false }) as unknown as typeof matchMedia;
 	});
 
-	it('is hidden at the top of the page', async () => {
-		render(ScrollToTop);
+	it('is hidden and non-interactive at the top of the page', async () => {
+		const { container } = render(ScrollToTop);
 		await tick();
-		expect(screen.queryByRole('button', { name: 'Scroll to top' })).toBeNull();
+		expect(button(container)).toHaveClass('opacity-0');
+		expect(button(container)).toHaveAttribute('inert');
 	});
 
 	it('stays hidden just below the threshold', async () => {
-		render(ScrollToTop);
+		const { container } = render(ScrollToTop);
 		await scrollTo(300);
-		expect(screen.queryByRole('button', { name: 'Scroll to top' })).toBeNull();
+		expect(button(container)).toHaveClass('opacity-0');
 	});
 
 	it('appears once scrolled past the threshold', async () => {
-		render(ScrollToTop);
+		const { container } = render(ScrollToTop);
 		await scrollTo(301);
-		expect(screen.getByRole('button', { name: 'Scroll to top' })).toBeInTheDocument();
+		expect(button(container)).toHaveClass('opacity-100');
+		expect(button(container)).not.toHaveAttribute('inert');
 	});
 
 	it('hides again when scrolled back to the top', async () => {
-		render(ScrollToTop);
+		const { container } = render(ScrollToTop);
 		await scrollTo(900);
-		expect(screen.getByRole('button', { name: 'Scroll to top' })).toBeInTheDocument();
+		expect(button(container)).toHaveClass('opacity-100');
 		await scrollTo(0);
-		// the fade-out transition has to finish before the node is removed
-		await new Promise((r) => setTimeout(r, 250));
-		expect(screen.queryByRole('button', { name: 'Scroll to top' })).toBeNull();
+		expect(button(container)).toHaveClass('opacity-0');
+		expect(button(container)).toHaveAttribute('inert');
 	});
 
 	it('scrolls smoothly to the top when clicked', async () => {
 		const scrollToSpy = vi.fn();
 		window.scrollTo = scrollToSpy as unknown as typeof window.scrollTo;
 
-		render(ScrollToTop);
+		const { container } = render(ScrollToTop);
 		await scrollTo(900);
-		screen.getByRole('button', { name: 'Scroll to top' }).click();
+		button(container).click();
 
 		expect(scrollToSpy).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
 	});
@@ -60,17 +72,17 @@ describe('ScrollToTop', () => {
 		window.scrollTo = scrollToSpy as unknown as typeof window.scrollTo;
 		window.matchMedia = vi.fn().mockReturnValue({ matches: true }) as unknown as typeof matchMedia;
 
-		render(ScrollToTop);
+		const { container } = render(ScrollToTop);
 		await scrollTo(900);
-		screen.getByRole('button', { name: 'Scroll to top' }).click();
+		button(container).click();
 
 		expect(scrollToSpy).toHaveBeenCalledWith({ top: 0, behavior: 'auto' });
 	});
 
 	it('is visible immediately if the page loads already scrolled', async () => {
 		Object.defineProperty(window, 'scrollY', { value: 900, writable: true, configurable: true });
-		render(ScrollToTop);
+		const { container } = render(ScrollToTop);
 		await tick();
-		expect(screen.getByRole('button', { name: 'Scroll to top' })).toBeInTheDocument();
+		expect(button(container)).toHaveClass('opacity-100');
 	});
 });
