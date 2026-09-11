@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 
 	import Footer from '$lib/components/Footer.svelte';
+	import ScrollToTop from '$lib/components/ScrollToTop.svelte';
 	import NavBar from '$lib/components/navbar/NavBar.svelte';
 	import NavBarLink from '$lib/components/navbar/NavBarLink.svelte';
 	import ThemeToggle from '$lib/components/navbar/ThemeToggle.svelte';
@@ -98,11 +99,13 @@
 			</div>
 		</div>
 
-		<div class="container mx-auto max-w-4xl mx-auto mt-6 md:mt-12 px-4 2xl:px-0 ">
+		<div class="container mx-auto max-w-4xl mx-auto mt-6 md:mt-12 px-4 2xl:px-0">
 			<slot />
 			<div class="mt-12">
 				<Footer />
 			</div>
 		</div>
+
+		<ScrollToTop />
 	</div>
 </div>
