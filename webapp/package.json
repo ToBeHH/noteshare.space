@@ -52,5 +52,8 @@
 		"katex": "^0.16.47",
 		"marked": "^18.0.12",
 		"svelte-icons": "^2.1.0"
+	},
+	"overrides": {
+		"cookie": "^0.7.2"
 	}
 }
