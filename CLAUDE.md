@@ -260,7 +260,14 @@ Things that will bite you:
   51-request burst no longer fits in the old 100ms one on Node 24, and the sleeps in
   `app.integration.test.ts` deliberately wait just past that window. Change one, change
   the other.
-- **`npm run lint` reports ~30 pre-existing issues** in the webapp (mostly `{@html}`
+- **Avoid Svelte `transition:` directives.** They drive the Web Animations API, and
+  tearing an element down mid-transition rejects the animation promise with an uncaught
+  `AbortError: The animation was canceled`. vitest treats that as an unhandled rejection
+  and exits non-zero *even when every test passed* — and whether it happens depends on
+  timing, so it can pass locally and fail in CI. `ScrollToTop.svelte` fades with a CSS
+  `transition-opacity` class instead and stays mounted, using `inert` to stay out of the
+  tab order while hidden.
+- **`npm run lint` reports ~28 pre-existing issues** in the webapp (mostly `{@html}`
   warnings, which are inherent — highlight.js and KaTeX output — and SvelteKit 2 style
   rules). They predate the migration; prettier is clean.
 
