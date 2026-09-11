@@ -121,7 +121,23 @@ Mitigating context for this deployment: the containers bind to `127.0.0.1` only,
 behind nginx, and terminate no TLS themselves — so the OpenSSL exposure is close to nil and
 HTTP-parser DoS bugs are largely absorbed by nginx first.
 
-See the bottom of this file for the measured feasibility of moving off it.
+**Measured feasibility of moving to Node 22 LTS (tested 2026-09-11, on the server, amd64):**
+
+- **webapp: works as-is.** `npm ci && npm run build` on `node:22-alpine` completes
+  cleanly — SvelteKit `1.0.0-next.544` + Vite 3 + adapter-node all build, exit 0. No
+  changes needed. This was the part expected to break, and it doesn't.
+- **server: blocked on Prisma.** Prisma 4.2 can't run on Node 22, and bumping to Prisma 6
+  makes `npm install` fail with **ERESOLVE** — the 2022 devDependency set (vitest 0.17,
+  vite-tsconfig-paths 3, ts-node, c8 …) has a peer graph npm cannot satisfy alongside
+  Prisma 6. Nothing installs at all, so `prisma generate` and `tsc` then fail downstream.
+  (Symptom if you hit this via `npx`: `npm exec prisma generate` spins at 99% CPU
+  indefinitely, because npx is trying to fetch the missing package.)
+
+So a Node upgrade is a real project: Prisma 4 → 6 **plus** replacing the test/build
+toolchain, and re-verifying migrations against the existing SQLite database. Worth doing,
+but it is not a dependency bump and should not be attempted as one. Do it on a branch and
+verify with the smoke test in `/cloud/noteshare/CLAUDE.md` before merging to `master`,
+since `master` is what the server deploys.
 
 ### Re-auditing
 
