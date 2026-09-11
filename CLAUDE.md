@@ -61,132 +61,132 @@ lives at [mcndt/obsidian-quickshare](https://github.com/mcndt/obsidian-quickshar
 - Notes expire after 30 days, hardcoded as `EXPIRE_WINDOW_DAYS` in
   `server/src/controllers/note/note.post.controller.ts`.
 
-## Build constraints (do not "modernise" casually)
+## Stack
 
-The production images are pinned to **`node:16-alpine3.16`**. Both halves of that pin are
-load-bearing:
+Modernized 2026-09-11 (commit `f6e6a0f`) off the EOL Node 16 / Alpine 3.16 base.
 
-- **`alpine3.16`** is the last Alpine with **OpenSSL 1.1**, which the **Prisma 4** musl
-  query engine links against. On 3.17+ the backend dies at runtime with
-  `Unable to require libquery_engine-linux-musl.so.node`.
-- **`node:16`** because SvelteKit `1.0.0-next.544` + Vite 3 are from 2022.
+| | Was (upstream) | Now |
+|---|---|---|
+| Runtime | Node 16 + Alpine 3.16 (both EOL) | **Node 24 LTS + Debian slim** |
+| ORM | Prisma 4 (bundled Rust engine) | **Prisma 7** + `better-sqlite3` driver adapter |
+| Server | Express 4, rate-limit 6, helmet 5, pino 8 | **Express 5**, rate-limit 8, helmet 8, pino 10 |
+| Frontend | SvelteKit `1.0.0-next.544`, Svelte 3, Vite 3 | **SvelteKit 2**, Svelte 4, Vite 5 |
+| Markdown | marked 4, svelte-markdown 0.2 | marked 6, svelte-markdown 0.4 |
+| Tooling | TS 4.7, vitest 0.17, ts-node, nodemon, c8 | TS 5.9, vitest 3, tsx |
 
-Moving off Node 16 means moving Prisma **and** the whole SvelteKit/Vite stack at the same
-time. See "Node 16 is EOL" below for the measured state of that.
+**Prisma 7 is what unlocked the runtime upgrade.** It has no bundled query engine —
+the database is reached through a driver adapter — so the OpenSSL-1.1/musl coupling
+that pinned the old image to `alpine3.16` is simply gone.
 
-The Dockerfiles used in production are **not** the ones in this repo — they live in
-`/cloud/noteshare/build/` on the server, so that `git reset --hard` here can't clobber
-them. If you change `server/Dockerfile` or `webapp/Dockerfile` here, nothing happens to
-the deployment.
+Things to know before changing versions:
+
+- **`svelte-markdown` is the ceiling on everything frontend.** It peer-requires
+  `svelte@^4`, which caps `@sveltejs/vite-plugin-svelte` at 3.x, which caps Vite at 5.
+  And it uses `marked.Slugger`, removed in **marked 7**, so marked cannot go past 6
+  — `overrides` forcing marked 18 makes it throw `Slugger is not a constructor`.
+  Breaking that chain means replacing it (see "Remaining work").
+- **`better-sqlite3` is compiled from source** in the build image (no prebuilt binary
+  for this Node/platform), so `/cloud/noteshare/build/server.Dockerfile` installs
+  `python3 make g++` in the build stage. If `npm ci` starts failing with node-gyp
+  errors, that is what to look at.
+- `tsconfig.json` sets `rootDir: ./src`, so the entrypoint is **`build/server.js`**
+  (upstream emitted `build/src/server.js`). The Dockerfile CMD matches.
+
+## The strikethrough bug (fixed 2026-09-11)
+
+Symptom: a note using `~` to mean "approximately" ("647 km · ~6:35 h") rendered with
+large spans struck through on the web, but looked fine in Obsidian.
+
+Cause: **marked follows GFM, which accepts a _single_ tilde as a strikethrough
+delimiter.** Obsidian only accepts `~~`. Two unrelated "~approx" values in one
+paragraph therefore became `<del>` with everything between them struck out. The note
+that prompted this produced **14 bogus `del` tokens**.
+
+marked only changed this default in **v18** — 4, 5, 6, 7, 9, 12, 15, 16 and 17 all
+produce the same 14 bad tokens, and v18 is unreachable (see the Slugger note above).
+
+Fix: `obsidianStrikethrough` in `src/lib/marked/extensions.ts` overrides marked's `del`
+tokenizer to require `~~`, registered in `MarkdownRenderer.svelte` next to the other
+extensions. **It returns `undefined`, not `false`** — marked's `use()` re-runs its own
+tokenizer when an override returns exactly `false`, which would put the single-tilde
+match straight back. An explicit rule is also version-proof, which matters given the
+marked ceiling.
+
+Covered by `src/test/markdown/strikethrough.test.ts`, including that real `~~text~~`
+still renders.
 
 ## Security posture
 
-### What was fixed (2026-09-11, commit `9d07b34`)
+Production closure (`npm audit --omit=dev`) as of 2026-09-11:
 
-Production closure went from **3 critical + 21 high** to **0 critical**:
+- **server: 0 vulnerabilities.**
+- **webapp: 2 moderate**, both `svelte <=5.55.6` SSR XSS advisories.
 
-| Change | Why |
-|---|---|
-| `class-validator` 0.13.2 → 0.14.4 | **CRITICAL** GHSA-fj58-h2fr-3pp2 (SQLi/XSS). Genuinely reachable — `validateOrReject()` runs on every POST/DELETE `/api/note`. Also drags `validator` 13.7.0 → 13.15.x (2 highs). |
-| **removed `sqlite3`** | **CRITICAL** tar advisories came in through `sqlite3` → `node-gyp`/`@mapbox/node-pre-gyp`. The package was **never imported anywhere** — Prisma ships its own SQLite engine. Removing it also killed ~10 highs (cacache, make-fetch-happen, ip, socks, semver, minimatch…) and removed the need for `python3/make/g++` in the build image. |
-| **removed `body-parser`** | Declared but unused; the code uses `express.json()`. |
-| `crypto-js` 4.1.1 → 4.2.0 | **CRITICAL** GHSA-xwcq-pm8m-c4vf (PBKDF2 1.3M× weaker than standard). |
-| `katex` 0.16.0 → 0.16.47 | 4 moderates, and it *is* real surface — KaTeX output is injected with `{@html}`. |
-| `@sveltejs/adapter-node` → devDependencies | It's a build-time adapter whose `build/` output is self-contained. Dropped rollup, picomatch, minimatch, brace-expansion (4 highs) out of the runtime image. |
-| `express` → 4.21.2, `bloom-filters` → 3.0.4, `crc` → 4.3.2, `express-rate-limit` → 6.11.2 | Assorted highs; `bloom-filters` 3.0.4 drops the vulnerable lodash. |
+The svelte ones are **not reachable**: grep confirms the codebase contains none of the
+patterns they need — no spread attributes in markup, no `<svelte:element>`, no
+`bind:innerText`/`bind:textContent`/`contenteditable`, no `<textarea>`. There is no fix
+short of Svelte 5, which `svelte-markdown` blocks.
 
-**The crypto-js bump was the scary one.** GHSA-xwcq-pm8m-c4vf is about `CryptoJS.PBKDF2`
-defaults changing (1 iteration/SHA1 → 250 000/SHA256). `decrypt_v1` does *not* use PBKDF2 —
-`AES.decrypt(ciphertext, passphrase)` derives its key with **EvpKDF**, which 4.2.0 did not
-touch. Verified empirically: `decrypt.test.ts` known-answer vectors, **6/6 pass** on
-node:16-alpine3.16 after the bump. Old notes still decrypt.
+Earlier rounds removed 3 criticals: `class-validator` (SQLi/XSS, reachable on every
+POST), `crypto-js` (weak PBKDF2), and the `tar` chain that came in via an **unused**
+`sqlite3` dependency. `mysql2`/`deepmerge-ts` arrive through `@prisma/client -> prisma`
+(the CLI bundles drivers for every database); they are pinned via `overrides` in
+`server/package.json` and are never loaded by a SQLite-only app.
 
-### What is deliberately left, and why
-
-| Finding | Assessment |
-|---|---|
-| `svelte <=5.55.6` — 9 high SSR XSS advisories | **Not reachable.** Every one of them needs a pattern this codebase does not contain: grep confirms **no** spread attributes in markup, **no** `<svelte:element>`, **no** `bind:innerText`/`bind:textContent`/`contenteditable`, **no** `<textarea>`. Fixing it means Svelte 3 → 5 *and* SvelteKit 1.0-next → 2, i.e. rewriting the frontend. Not worth it for advisories that cannot fire. |
-| `qs` moderate (server, via express 4) | Express 4 pins its own `qs`. The app never reads `req.query`, so `qs.parse` is never even invoked. Clearing it needs express 5 + express-rate-limit 7+. |
-| devDependency advisories (`vitest`, `happy-dom`, `@babel/traverse`, `form-data`, `tar`) | Never reach the server: the Dockerfiles run `npm ci` → `npm run build` → **`npm prune --production`**. They also don't fire during the build — `vitest`/`happy-dom` criticals need the test runner to actually run, which the image build never does. |
-| Markdown → `{@html}` in `Code.svelte` / `Math.svelte` | Inherent to the app: a note author can attempt XSS against a note *viewer*. Client-side only, does not touch the server. highlight.js and KaTeX (with default `trust: false`) escape their output. |
-
-### Node 16 is EOL — the real remaining risk
-
-`npm audit` says nothing about the runtime, and that's where the actual unpatched
-CVE surface is. **Node 16 went EOL 2023-09-11** and **Alpine 3.16 went EOL 2024-05-23**
-(so its OpenSSL 1.1 is also unpatched). Nothing in that stack will ever get another
-security fix.
-
-Mitigating context for this deployment: the containers bind to `127.0.0.1` only, sit
-behind nginx, and terminate no TLS themselves — so the OpenSSL exposure is close to nil and
-HTTP-parser DoS bugs are largely absorbed by nginx first.
-
-**Measured feasibility of moving to Node 22 LTS (tested 2026-09-11, on the server, amd64):**
-
-- **webapp: works as-is.** `npm ci && npm run build` on `node:22-alpine` completes
-  cleanly — SvelteKit `1.0.0-next.544` + Vite 3 + adapter-node all build, exit 0. No
-  changes needed. This was the part expected to break, and it doesn't.
-- **server: blocked on Prisma.** Prisma 4.2 can't run on Node 22, and bumping to Prisma 6
-  makes `npm install` fail with **ERESOLVE** — the 2022 devDependency set (vitest 0.17,
-  vite-tsconfig-paths 3, ts-node, c8 …) has a peer graph npm cannot satisfy alongside
-  Prisma 6. Nothing installs at all, so `prisma generate` and `tsc` then fail downstream.
-  (Symptom if you hit this via `npx`: `npm exec prisma generate` spins at 99% CPU
-  indefinitely, because npx is trying to fetch the missing package.)
-
-So a Node upgrade is a real project: Prisma 4 → 6 **plus** replacing the test/build
-toolchain, and re-verifying migrations against the existing SQLite database. Worth doing,
-but it is not a dependency bump and should not be attempted as one. Do it on a branch and
-verify with the smoke test in `/cloud/noteshare/CLAUDE.md` before merging to `master`,
-since `master` is what the server deploys.
-
-### Re-auditing
-
-Always audit the **production** closure — the full audit is mostly devDependency noise:
-
-```bash
-cd server && npm audit --package-lock-only --omit=dev
-cd webapp && npm audit --package-lock-only --omit=dev
-```
-
-`--package-lock-only` means you don't need `node_modules` installed. Note that plain
-`npm audit fix` **fails with ERESOLVE** in `webapp/` (the SvelteKit-next peer graph is
-unsatisfiable to npm); edit `package.json` and re-run `npm install --package-lock-only`
-instead.
+Always audit the **production** closure — the full audit is mostly devDependency noise
+that `npm prune --omit=dev` strips from the image anyway.
 
 ## Development
 
-`npm ci` in each subproject. Local Node must be **16** for a faithful build; a modern Node
-will produce a lockfile the production image can't install.
+Local Node should be **24**. `npm install` in each subproject.
 
 ```bash
-cd server  && npx dotenv -e .env.test -- npx vitest run unit   # 23 tests
-cd webapp  && npx vitest run src/lib/crypto/decrypt.test.ts    # 6 crypto known-answer tests
+cd server  && npx prisma generate && npm test   # 37 tests, needs the generate first
+cd webapp  && npm test                          # 24 tests + 4 pre-existing skips
 ```
 
-Note `npm test` in `server/` also runs `prisma migrate reset`, which wants a database —
-`vitest run unit` alone is enough for a quick check. The unit tests **require `.env.test`
-to be loaded**; without it 5 tests in `note.post.controller.unit.test.ts` fail on
-`expected 'undefined/note/1234' to match /^http[s]?:\/\//` because `FRONTEND_URL` is
-unset. That's a harness mistake, not a regression — don't go chasing it.
+Things that will bite you:
+
+- **`server/npm test` needs `prisma generate` first.** The client is generated into
+  `src/generated/prisma` (gitignored), and nothing compiles without it.
+- **The unit tests require `.env.test`.** The npm scripts load it via `dotenv-cli`;
+  running `vitest` directly gives 5 failures in `note.post.controller.unit.test.ts`
+  (`expected 'undefined/note/1234' to match /^http[s]?:\/\//`) because `FRONTEND_URL`
+  is unset. That is a harness mistake, not a regression.
+- **Test files must run serially.** vitest 3 parallelises by file and these integration
+  tests share one SQLite database; `test:test` passes `--no-file-parallelism`.
+- **The rate-limit tests are timing-coupled.** `.env.test` uses a 2s window because a
+  51-request burst no longer fits in the old 100ms one on Node 24, and the sleeps in
+  `app.integration.test.ts` deliberately wait just past that window so later tests can
+  make requests again. Change one, change the other.
 
 ### Verifying a change the way it actually ships
 
-Local `npm ci` on an Apple-silicon Mac is *not* a faithful test (different arch, different
-Node). Build in the production image instead:
+A Mac has neither the right arch nor the right Node. Build in the production image:
 
 ```bash
-docker run --rm -v "$PWD/server:/app" -w /app node:16-alpine3.16 \
-  sh -c "npm ci && npx prisma generate && npm run build && npx dotenv -e .env.test -- npx vitest run unit"
+docker run --rm -v "$PWD/server:/app" -w /app node:24-slim sh -c \
+  "apt-get update && apt-get install -y python3 make g++ && npm ci && npx prisma generate && npm run build && npm test"
 ```
 
 For a full pre-merge check, push the branch and build it on the server against the real
-`/cloud/noteshare/build/*.Dockerfile`, which is what production uses.
+`/cloud/noteshare/build/*.Dockerfile` — that is what production uses.
+
+## Remaining work
+
+**Svelte 5 / marked 18.** Replacing `svelte-markdown` with a Svelte-5-compatible
+renderer (e.g. `@humanspeak/svelte-markdown`, which already uses marked 18) would
+unlock Svelte 5, Vite 7/8 and marked 18, and clear the last 2 moderate advisories.
+It is the only thing left on the modernization path — but it swaps out the component
+that renders notes, and the custom renderers in `src/lib/marked/renderers/` would need
+re-verifying against its API. The strikethrough fix does not depend on it.
 
 ## Conventions
 
 - Keep `master` deployable — it is what the server pulls.
-- Do security work on a branch, verify in `node:16-alpine3.16`, then merge.
-- When bumping anything the webapp depends on, **run the crypto known-answer tests**.
+- Do risky work on a branch, verify in `node:24-slim`, then merge.
+- When bumping anything the webapp depends on, **run the crypto known-answer tests**
+  and the markdown tests.
 - When bumping anything the server depends on, check that a garbage POST still returns
   `400` — that is `class-validator` doing its job, and it is the only input validation
   there is.
