@@ -11,3 +11,6 @@ node_modules
 pnpm-lock.yaml
 package-lock.json
 yarn.lock
+
+# Markdown test fixtures: their exact formatting is the thing under test.
+src/test/markdown/input/

@@ -1,10 +1,10 @@
 <script lang="ts">
 	// @ts-nocheck (type checks fail for custom renderers)
-	import SvelteMarkdown from 'svelte-markdown';
+	import SvelteMarkdown from '@humanspeak/svelte-markdown';
 	import Heading from '$lib/marked/renderers/Heading.svelte';
 	import List from '$lib/marked/renderers/List.svelte';
 	import InternalLink from '$lib/marked/renderers/InternalLink.svelte';
-	import { marked } from 'marked';
+	import { tick } from 'svelte';
 	import extensions, { obsidianStrikethrough } from '$lib/marked/extensions';
 	import Link from '$lib/marked/renderers/Link.svelte';
 	import Tag from '$lib/marked/renderers/Tag.svelte';
@@ -25,14 +25,24 @@
 	let footnotes: HTMLDivElement[];
 	let footnoteContainer: HTMLDivElement;
 
-	// @ts-ignore: typing mismatch
-	marked.use({ extensions: extensions });
-	// Only "~~" is strikethrough, as in Obsidian -- not GFM's single "~".
-	marked.use(obsidianStrikethrough);
+	// Extensions go to <SvelteMarkdown> as a prop rather than through a global
+	// marked.use(): the renderer keeps its own marked instance, and this way the
+	// parser also learns about the custom token types they emit.
+	const markedExtensions = [
+		{ extensions },
+		// Only "~~" is strikethrough, as in Obsidian -- not GFM's single "~".
+		obsidianStrikethrough
+	];
 
-	const options = { ...marked.defaults, breaks: true };
+	// Do NOT spread marked.defaults here: it carries `extensions: null`, which
+	// overwrites the extensions prop and silently drops every custom token type.
+	const options = { breaks: true };
 
-	function onParsed() {
+	// The renderer calls this from its own $effect, which can run before this
+	// component's `bind:this={ref}` has been assigned. Wait a tick so `ref` exists.
+	async function onParsed() {
+		await tick();
+		if (!ref) return;
 		!fileTitle && setTitle();
 		parseFootnotes();
 	}
@@ -80,7 +90,8 @@ prose-blockquote:first:before:content-[''] prose-hr:transition-colors prose-code
 		<h1>{fileTitle}</h1>
 	{/if}
 	<SvelteMarkdown
-		on:parsed={onParsed}
+		parsed={onParsed}
+		extensions={markedExtensions}
 		renderers={{
 			heading: Heading,
 			list: List,
@@ -104,6 +115,6 @@ prose-blockquote:first:before:content-[''] prose-hr:transition-colors prose-code
 	<!-- footnote container -->
 	{#if footnotes?.length > 0}
 		<hr />
-		<div bind:this={footnoteContainer} />
+		<div bind:this={footnoteContainer}></div>
 	{/if}
 </div>
