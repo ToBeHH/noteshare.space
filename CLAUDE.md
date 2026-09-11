@@ -60,37 +60,65 @@ lives at [mcndt/obsidian-quickshare](https://github.com/mcndt/obsidian-quickshar
   and silently unreadable notes.
 - Notes expire after 30 days, hardcoded as `EXPIRE_WINDOW_DAYS` in
   `server/src/controllers/note/note.post.controller.ts`.
-
 ## Stack
 
-Modernized 2026-09-11 (commit `f6e6a0f`) off the EOL Node 16 / Alpine 3.16 base.
+Fully modernized 2026-09-11 off the EOL Node 16 / Alpine 3.16 base.
 
 | | Was (upstream) | Now |
 |---|---|---|
 | Runtime | Node 16 + Alpine 3.16 (both EOL) | **Node 24 LTS + Debian slim** |
 | ORM | Prisma 4 (bundled Rust engine) | **Prisma 7** + `better-sqlite3` driver adapter |
 | Server | Express 4, rate-limit 6, helmet 5, pino 8 | **Express 5**, rate-limit 8, helmet 8, pino 10 |
-| Frontend | SvelteKit `1.0.0-next.544`, Svelte 3, Vite 3 | **SvelteKit 2**, Svelte 4, Vite 5 |
-| Markdown | marked 4, svelte-markdown 0.2 | marked 6, svelte-markdown 0.4 |
-| Tooling | TS 4.7, vitest 0.17, ts-node, nodemon, c8 | TS 5.9, vitest 3, tsx |
+| Frontend | SvelteKit `1.0.0-next.544`, Svelte 3, Vite 3 | **SvelteKit 2, Svelte 5, Vite 8** |
+| Markdown | marked 4, svelte-markdown 0.2 | **marked 18**, `@humanspeak/svelte-markdown` |
+| Tooling | TS 4.7, vitest 0.17, ts-node, nodemon, c8, eslint 8 | TS 5.9, vitest 3, tsx, eslint 9 flat config |
 
-**Prisma 7 is what unlocked the runtime upgrade.** It has no bundled query engine —
-the database is reached through a driver adapter — so the OpenSSL-1.1/musl coupling
-that pinned the old image to `alpine3.16` is simply gone.
+Two swaps unlocked everything else:
 
-Things to know before changing versions:
+- **Prisma 7** has no bundled query engine — SQLite is reached through a driver
+  adapter — which removed the OpenSSL-1.1/musl coupling that pinned the image to
+  `alpine3.16`.
+- **`@humanspeak/svelte-markdown`** replaced `svelte-markdown`, which was the ceiling
+  on the entire frontend: it peer-required Svelte 4 (capping vite-plugin-svelte at 3
+  and Vite at 5) and used `marked.Slugger`, removed in marked 7. Forcing marked 18 on
+  it fails with `Slugger is not a constructor`.
 
-- **`svelte-markdown` is the ceiling on everything frontend.** It peer-requires
-  `svelte@^4`, which caps `@sveltejs/vite-plugin-svelte` at 3.x, which caps Vite at 5.
-  And it uses `marked.Slugger`, removed in **marked 7**, so marked cannot go past 6
-  — `overrides` forcing marked 18 makes it throw `Slugger is not a constructor`.
-  Breaking that chain means replacing it (see "Remaining work").
-- **`better-sqlite3` is compiled from source** in the build image (no prebuilt binary
-  for this Node/platform), so `/cloud/noteshare/build/server.Dockerfile` installs
-  `python3 make g++` in the build stage. If `npm ci` starts failing with node-gyp
-  errors, that is what to look at.
+### ⚠️ Prisma DateTime storage — read before touching the ORM
+
+**Prisma 4 stored DateTime as INTEGER epoch milliseconds. Prisma 7 stores and *binds*
+it as ISO-8601 TEXT.** SQLite orders by storage class before value, and INTEGER always
+sorts before TEXT — so after the upgrade every legacy row satisfied
+`expire_time <= <now as text>` and `deleteExpiredNotes()` purged the entire table on
+its first tick, ten minutes after deploy. This happened in production.
+
+`migrations/20260911120000_datetime_integer_to_text` converts legacy rows and is
+idempotent (`typeof()`-guarded). `src/db/legacyDateTime.integration.test.ts` covers
+both directions.
+
+**The lesson generalises:** a Prisma major upgrade can change the on-disk
+representation without changing the schema, and the schema-diff migrations Prisma
+generates will not mention it. Before deploying an ORM major bump, dump the raw
+column types from a copy of the live database:
+
+```bash
+sqlite3 db.sqlite "select id, typeof(expire_time), expire_time from EncryptedNote limit 3;"
+```
+
+and check they still look the way the new version writes them.
+
+### Other build constraints
+
+- **`better-sqlite3` is compiled from source** in the build image, so
+  `/cloud/noteshare/build/server.Dockerfile` installs `python3 make g++` in the build
+  stage. Ad-hoc `docker run node:24-slim npm install` needs the same, or it dies in
+  node-gyp — and because npm hides install-script failures, the visible symptom is
+  `npx prisma generate` spinning at 100% CPU forever while it tries to fetch the
+  package it never installed.
 - `tsconfig.json` sets `rootDir: ./src`, so the entrypoint is **`build/server.js`**
-  (upstream emitted `build/src/server.js`). The Dockerfile CMD matches.
+  (upstream emitted `build/src/server.js`).
+- Vitest needs `resolve.conditions: ['browser']` (see `vite.config.js`), or
+  `@testing-library/svelte` gets Svelte 5's **server** build and every `render()` fails
+  with `mount(...) is not available on the server`.
 
 ## The strikethrough bug (fixed 2026-09-11)
 
@@ -99,49 +127,55 @@ large spans struck through on the web, but looked fine in Obsidian.
 
 Cause: **marked follows GFM, which accepts a _single_ tilde as a strikethrough
 delimiter.** Obsidian only accepts `~~`. Two unrelated "~approx" values in one
-paragraph therefore became `<del>` with everything between them struck out. The note
-that prompted this produced **14 bogus `del` tokens**.
+paragraph became `<del>` with everything between them struck out — the note that
+prompted this produced **14 bogus `del` tokens**. marked only changed this default in
+**v18**; 4, 5, 6, 7, 9, 12, 15, 16 and 17 all produce the same 14.
 
-marked only changed this default in **v18** — 4, 5, 6, 7, 9, 12, 15, 16 and 17 all
-produce the same 14 bad tokens, and v18 is unreachable (see the Slugger note above).
-
-Fix: `obsidianStrikethrough` in `src/lib/marked/extensions.ts` overrides marked's `del`
-tokenizer to require `~~`, registered in `MarkdownRenderer.svelte` next to the other
-extensions. **It returns `undefined`, not `false`** — marked's `use()` re-runs its own
-tokenizer when an override returns exactly `false`, which would put the single-tilde
-match straight back. An explicit rule is also version-proof, which matters given the
-marked ceiling.
+Fixed twice over: the stack is on marked 18 now, *and* `obsidianStrikethrough` in
+`src/lib/marked/extensions.ts` overrides marked's `del` tokenizer to require `~~`.
+The explicit rule is kept deliberately — it survives marked changing its mind again.
+**It returns `undefined`, not `false`**: marked's `use()` re-runs its own tokenizer
+when an override returns exactly `false`, which would reinstate the single-tilde match.
 
 Covered by `src/test/markdown/strikethrough.test.ts`, including that real `~~text~~`
 still renders.
 
+## Markdown renderer wiring
+
+`@humanspeak/svelte-markdown` takes custom marked extensions as a **prop**, not via a
+global `marked.use()` — the component owns its own marked instance, and the prop is
+also how it learns which custom token types (`internal-link`, `tag`, `math-block`, …)
+are allowed to reach a renderer. Two traps:
+
+- **Do not spread `marked.defaults` into `options`.** It carries `extensions: null`,
+  which overwrites the prop and silently drops every custom token — `[[internal links]]`
+  render as literal raw text with no error.
+- **`onParsed` must `await tick()`.** The renderer fires the callback from its own
+  `$effect`, which can run before the parent's `bind:this={ref}` is assigned.
+
 ## Security posture
 
-Production closure (`npm audit --omit=dev`) as of 2026-09-11:
+Production closure (`npm audit --omit=dev`), 2026-09-11:
 
-- **server: 0 vulnerabilities.**
-- **webapp: 2 moderate**, both `svelte <=5.55.6` SSR XSS advisories.
-
-The svelte ones are **not reachable**: grep confirms the codebase contains none of the
-patterns they need — no spread attributes in markup, no `<svelte:element>`, no
-`bind:innerText`/`bind:textContent`/`contenteditable`, no `<textarea>`. There is no fix
-short of Svelte 5, which `svelte-markdown` blocks.
+- **server: 0 vulnerabilities**
+- **webapp: 0 vulnerabilities**
 
 Earlier rounds removed 3 criticals: `class-validator` (SQLi/XSS, reachable on every
 POST), `crypto-js` (weak PBKDF2), and the `tar` chain that came in via an **unused**
-`sqlite3` dependency. `mysql2`/`deepmerge-ts` arrive through `@prisma/client -> prisma`
-(the CLI bundles drivers for every database); they are pinned via `overrides` in
-`server/package.json` and are never loaded by a SQLite-only app.
+`sqlite3` dependency. The Svelte 5 move cleared the last 2 moderates (SSR XSS
+advisories that were in any case unreachable here). `mysql2`/`deepmerge-ts` arrive via
+`@prisma/client -> prisma` (the CLI bundles drivers for every database) and are pinned
+through `overrides` in `server/package.json`.
 
 Always audit the **production** closure — the full audit is mostly devDependency noise
 that `npm prune --omit=dev` strips from the image anyway.
 
 ## Development
 
-Local Node should be **24**. `npm install` in each subproject.
+Local Node should be **24**.
 
 ```bash
-cd server  && npx prisma generate && npm test   # 37 tests, needs the generate first
+cd server  && npx prisma generate && npm test   # 39 tests
 cd webapp  && npm test                          # 24 tests + 4 pre-existing skips
 ```
 
@@ -149,7 +183,7 @@ Things that will bite you:
 
 - **`server/npm test` needs `prisma generate` first.** The client is generated into
   `src/generated/prisma` (gitignored), and nothing compiles without it.
-- **The unit tests require `.env.test`.** The npm scripts load it via `dotenv-cli`;
+- **The server tests require `.env.test`.** The npm scripts load it via `dotenv-cli`;
   running `vitest` directly gives 5 failures in `note.post.controller.unit.test.ts`
   (`expected 'undefined/note/1234' to match /^http[s]?:\/\//`) because `FRONTEND_URL`
   is unset. That is a harness mistake, not a regression.
@@ -157,8 +191,11 @@ Things that will bite you:
   tests share one SQLite database; `test:test` passes `--no-file-parallelism`.
 - **The rate-limit tests are timing-coupled.** `.env.test` uses a 2s window because a
   51-request burst no longer fits in the old 100ms one on Node 24, and the sleeps in
-  `app.integration.test.ts` deliberately wait just past that window so later tests can
-  make requests again. Change one, change the other.
+  `app.integration.test.ts` deliberately wait just past that window. Change one, change
+  the other.
+- **`npm run lint` reports ~30 pre-existing issues** in the webapp (mostly `{@html}`
+  warnings, which are inherent — highlight.js and KaTeX output — and SvelteKit 2 style
+  rules). They predate the migration; prettier is clean.
 
 ### Verifying a change the way it actually ships
 
@@ -172,15 +209,6 @@ docker run --rm -v "$PWD/server:/app" -w /app node:24-slim sh -c \
 For a full pre-merge check, push the branch and build it on the server against the real
 `/cloud/noteshare/build/*.Dockerfile` — that is what production uses.
 
-## Remaining work
-
-**Svelte 5 / marked 18.** Replacing `svelte-markdown` with a Svelte-5-compatible
-renderer (e.g. `@humanspeak/svelte-markdown`, which already uses marked 18) would
-unlock Svelte 5, Vite 7/8 and marked 18, and clear the last 2 moderate advisories.
-It is the only thing left on the modernization path — but it swaps out the component
-that renders notes, and the custom renderers in `src/lib/marked/renderers/` would need
-re-verifying against its API. The strikethrough fix does not depend on it.
-
 ## Conventions
 
 - Keep `master` deployable — it is what the server pulls.
@@ -190,3 +218,5 @@ re-verifying against its API. The strikethrough fix does not depend on it.
 - When bumping anything the server depends on, check that a garbage POST still returns
   `400` — that is `class-validator` doing its job, and it is the only input validation
   there is.
+- **Before any ORM major bump, check the raw on-disk column types** (see above). Take a
+  copy of the live database first; `/cloud/noteshare/update.sh` does not back it up.
