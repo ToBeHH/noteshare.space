@@ -1,10 +1,29 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { plugin as markdown } from 'vite-plugin-markdown';
+import { marked } from 'marked';
 import { searchForWorkspaceRoot } from 'vite';
 import { defineConfig } from 'vitest/config';
 
+/**
+ * Turns an imported .md file into `export const html`.
+ *
+ * Replaces vite-plugin-markdown, which pulls an old markdown-it/linkify-it with
+ * high-severity advisories and no upstream fix. We only ever used its `html`
+ * export (never `toc`), and marked is already a dependency of this app.
+ */
+function markdownHtml() {
+	return {
+		name: 'markdown-html',
+		enforce: 'pre',
+		async transform(code, id) {
+			if (!id.endsWith('.md')) return null;
+			const html = await marked.parse(code);
+			return { code: `export const html = ${JSON.stringify(html)};`, map: null };
+		}
+	};
+}
+
 export default defineConfig({
-	plugins: [sveltekit(), markdown({ mode: ['html', 'toc'] })],
+	plugins: [sveltekit(), markdownHtml()],
 	optimizeDeps: {
 		include: ['highlight.js', 'highlight.js/lib/core']
 	},

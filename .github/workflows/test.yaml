@@ -1,38 +1,73 @@
-name: Test server and webapp
+name: Test
 
 on:
-  workflow_call:
-    # inputs:
-    # secrets:
+  push:
+    branches: [master]
   pull_request:
     branches: [master]
 
+# `master` is what the production server pulls (see CLAUDE.md), so this runs on
+# push as well as on PRs.
+
 jobs:
-  test-server:
-    name: Server tests
+  server:
+    name: Server
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./server
     steps:
-      - uses: actions/checkout@v3
-      - name: Unit and integration tests
-        uses: actions/setup-node@v3
+      # No `submodules:` — plugin/ is declared with an SSH URL and is not needed
+      # to build or test anything here.
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 16.x
+          node-version: 24
+          cache: npm
+          cache-dependency-path: server/package-lock.json
       - run: npm ci
-      - run: npm run test
-  test-webapp:
-    name: Webapp tests
+      # The Prisma client is generated into src/generated/ and is gitignored,
+      # so nothing type-checks until this has run.
+      - run: npx prisma generate
+      - run: npm run build
+      - run: npm test
+
+  webapp:
+    name: Webapp
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./webapp
     steps:
-      - uses: actions/checkout@v3
-      - name: Unit and integration tests
-        uses: actions/setup-node@v3
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 16.x
+          node-version: 24
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
       - run: npm ci
-      - run: npm run test
+      - run: npx svelte-kit sync
+      - run: npm test
+      - run: npm run build
+        env:
+          # Build-time only; Vite bakes these into the bundle.
+          VITE_SERVER_INTERNAL: http://noteshare-backend:8080
+          VITE_BRANDING: Noteshare
+
+  audit:
+    name: Production audit (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [server, webapp]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # Only the production closure: devDependencies are stripped by
+      # `npm prune --omit=dev` in the Dockerfiles and never reach the server.
+      # Both closures are at zero as of 2026-09-11 — keep them there.
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: ./${{ matrix.package }}

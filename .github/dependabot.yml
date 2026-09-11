@@ -1,0 +1,74 @@
+version: 2
+
+updates:
+  # ---------------------------------------------------------------- server
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels: [dependencies, server]
+    groups:
+      # One PR for the routine noise, so the individual PRs that are left are
+      # the ones worth reading.
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Prisma majors change the on-disk DateTime representation without
+      # changing the schema — that is what purged the note table on the 4 -> 7
+      # upgrade. Those need the raw-column check in CLAUDE.md, not a bot.
+      - dependency-name: prisma
+        update-types: [version-update:semver-major]
+      - dependency-name: "@prisma/client"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@prisma/adapter-better-sqlite3"
+        update-types: [version-update:semver-major]
+
+  # ---------------------------------------------------------------- webapp
+  - package-ecosystem: npm
+    directory: /webapp
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels: [dependencies, webapp]
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # A marked major changed strikethrough parsing under us once already; and
+      # svelte/kit/vite majors move as a set. Both want a human.
+      - dependency-name: marked
+        update-types: [version-update:semver-major]
+      - dependency-name: svelte
+        update-types: [version-update:semver-major]
+      - dependency-name: "@sveltejs/kit"
+        update-types: [version-update:semver-major]
+      - dependency-name: vite
+        update-types: [version-update:semver-major]
+
+  # ------------------------------------------------------ root (dev tooling)
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels: [dependencies, tooling]
+    groups:
+      all:
+        patterns: ["*"]
+
+  # ------------------------------------------------------------ CI actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels: [dependencies, ci]
+    groups:
+      actions:
+        patterns: ["*"]
