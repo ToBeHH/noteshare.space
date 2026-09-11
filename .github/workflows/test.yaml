@@ -5,6 +5,10 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # This repo is a fork, so GitHub keeps Actions disabled until they are enabled
+  # once by hand in the Actions tab. workflow_dispatch gives a way to kick a run
+  # off afterwards without pushing.
+  workflow_dispatch:
 
 # `master` is what the production server pulls (see CLAUDE.md), so this runs on
 # push as well as on PRs.
