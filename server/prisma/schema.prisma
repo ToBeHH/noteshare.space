@@ -2,12 +2,15 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
 }
 
+// Prisma 7 no longer accepts `url` here; the connection string lives in
+// prisma.config.ts for the CLI and is passed to the driver adapter at runtime.
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
 }
 
 model EncryptedNote {

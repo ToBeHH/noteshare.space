@@ -25,11 +25,11 @@ export const load: PageServerLoad = async ({ request, params, setHeaders, getCli
 			});
 			return { note };
 		} catch {
-			throw error(500, response.statusText);
+			error(500, response.statusText);
 		}
 	} else {
 		// get the response body (the reason why the request failed)
 		const body = await response.text();
-		throw error(response.status, body);
+		error(response.status, body);
 	}
 };

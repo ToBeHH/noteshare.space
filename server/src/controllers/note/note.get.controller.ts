@@ -4,7 +4,7 @@ import EventLogger from "../../logging/EventLogger";
 import { getConnectingIp, getNoteSize } from "../../util";
 import { getNote } from "../../db/note.dao";
 export async function getNoteController(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response,
   next: NextFunction
 ): Promise<void> {

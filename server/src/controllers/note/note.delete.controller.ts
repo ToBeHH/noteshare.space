@@ -8,7 +8,7 @@ import { getConnectingIp, getNoteSize } from "../../util";
 import { NoteDeleteRequest } from "../../validation/Request";
 
 export async function deleteNoteController(
-  req: Request,
+  req: Request<{ id: string }>,
   res: Response,
   next: NextFunction
 ): Promise<void> {

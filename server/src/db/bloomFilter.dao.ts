@@ -16,11 +16,18 @@ export async function getFilter<T extends BaseFilter>(
   name: string,
   cls: IDeserializedFilter
 ): Promise<T> {
-  const bloomFilter = await prisma.bloomFilter.findUniqueOrThrow({
+  // findUnique + an explicit throw, rather than findUniqueOrThrow: callers
+  // (NoteIdFilter.deserializeFromDb) branch on this exact message, and Prisma's
+  // own "not found" message is not part of its API -- it changed between 4 and 5,
+  // which silently turned "filter missing" into a 500.
+  const bloomFilter = await prisma.bloomFilter.findUnique({
     where: {
       name: name,
     },
   });
+  if (bloomFilter === null) {
+    throw new Error("No BloomFilter found");
+  }
   const serializedFilter = bloomFilter.serializedFilter;
   return deserializeFilter<T>(serializedFilter, cls);
 }
@@ -50,18 +57,22 @@ export async function upsertFilter(
   });
 }
 
-function serializeFilter(filter: BaseFilter): Buffer {
+// Prisma 7 maps `Bytes` to Uint8Array rather than Buffer. TextEncoder/TextDecoder
+// are UTF-8 in both directions, so this stays byte-compatible with filters that
+// were written by the previous Buffer.from(..., "utf-8") implementation.
+function serializeFilter(filter: BaseFilter): Uint8Array<ArrayBuffer> {
   const filterJSON = filter.saveAsJSON();
   const filterString = JSON.stringify(filterJSON);
-  const filterBuffer = Buffer.from(filterString, "utf-8");
-  return filterBuffer;
+  // Re-wrap: TextEncoder is typed as Uint8Array<ArrayBufferLike>, but Prisma's
+  // Bytes field wants the narrower Uint8Array<ArrayBuffer>.
+  return new Uint8Array(new TextEncoder().encode(filterString));
 }
 
 function deserializeFilter<T extends BaseFilter>(
-  serializedFilter: Buffer,
+  serializedFilter: Uint8Array,
   cls: IDeserializedFilter
 ): T {
-  const filterString = serializedFilter.toString("utf-8");
+  const filterString = new TextDecoder("utf-8").decode(serializedFilter);
   const filterJSON = JSON.parse(filterString);
   const filter = cls.fromJSON(filterJSON) as T;
   return filter;

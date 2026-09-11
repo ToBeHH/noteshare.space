@@ -172,6 +172,40 @@ const footnote = {
 	}
 };
 
+/**
+ * Obsidian-compatible strikethrough.
+ *
+ * marked follows GFM, which accepts a SINGLE tilde as a strikethrough
+ * delimiter, so a note using "~" to mean "approximately" ("~6:35 h ... ~3:15 h")
+ * gets everything between two such tildes struck through. Obsidian only treats
+ * "~~" as strikethrough, so notes looked correct in Obsidian and wrong here.
+ *
+ * This overrides marked's `del` tokenizer to require "~~". Returning `undefined`
+ * rather than `false` matters: marked's `use()` re-runs its own tokenizer when an
+ * override returns exactly `false`, which would reinstate the single-tilde match.
+ *
+ * marked 18 changed the default to match, but svelte-markdown pins marked to v5/v6
+ * (it uses `marked.Slugger`, removed in marked 7), so we cannot rely on that yet --
+ * and an explicit rule is version-proof anyway.
+ */
+export const obsidianStrikethrough = {
+	tokenizer: {
+		del(src: string): unknown {
+			const match = /^(~~)(?=[^\s~])([\s\S]*?[^\s~])\1(?=[^~]|$)/.exec(src);
+			if (match) {
+				return {
+					type: 'del',
+					raw: match[0],
+					text: match[2],
+					// @ts-expect-error - marked types do not expose `this.lexer`
+					tokens: this.lexer.inlineTokens(match[2])
+				};
+			}
+			return undefined;
+		}
+	}
+};
+
 export default [
 	InternalLinkExtension,
 	InternalEmbedExtension,

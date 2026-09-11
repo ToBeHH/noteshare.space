@@ -1,4 +1,4 @@
-import { event } from "@prisma/client";
+import { event } from "../generated/prisma/client";
 import prisma from "../db/client";
 import logger from "./logger";
 

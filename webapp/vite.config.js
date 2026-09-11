@@ -1,9 +1,9 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { plugin as markdown } from 'vite-plugin-markdown';
 import { searchForWorkspaceRoot } from 'vite';
+import { defineConfig } from 'vitest/config';
 
-/** @type {import('vite').UserConfig} */
-const config = {
+export default defineConfig({
 	plugins: [sveltekit(), markdown({ mode: ['html', 'toc'] })],
 	optimizeDeps: {
 		include: ['highlight.js', 'highlight.js/lib/core']
@@ -19,6 +19,4 @@ const config = {
 			allow: [searchForWorkspaceRoot(process.cwd()), '/CHANGELOG.md']
 		}
 	}
-};
-
-export default config;
+});

@@ -1,4 +1,4 @@
-import { EncryptedNote } from "@prisma/client";
+import { EncryptedNote } from "../generated/prisma/client";
 import prisma from "./client";
 
 export async function getNote(noteId: string): Promise<EncryptedNote | null> {

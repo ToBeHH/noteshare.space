@@ -9,6 +9,11 @@ import { deleteExpiredNotes, deleteInterval } from "./tasks/deleteExpiredNotes";
 // Initialize middleware clients
 export const app: Express = express();
 
+// Exactly one reverse proxy (nginx) sits in front of this service. Without this,
+// req.ip is always the proxy's address and the rate limits below end up global
+// instead of per client. express-rate-limit v8 also refuses to start otherwise.
+app.set("trust proxy", 1);
+
 // Enable JSON body parsing
 app.use(express.json({}));
 

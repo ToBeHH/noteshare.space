@@ -5,7 +5,7 @@
 	import List from '$lib/marked/renderers/List.svelte';
 	import InternalLink from '$lib/marked/renderers/InternalLink.svelte';
 	import { marked } from 'marked';
-	import extensions from '$lib/marked/extensions';
+	import extensions, { obsidianStrikethrough } from '$lib/marked/extensions';
 	import Link from '$lib/marked/renderers/Link.svelte';
 	import Tag from '$lib/marked/renderers/Tag.svelte';
 	import Highlight from '$lib/marked/renderers/Highlight.svelte';
@@ -27,6 +27,8 @@
 
 	// @ts-ignore: typing mismatch
 	marked.use({ extensions: extensions });
+	// Only "~~" is strikethrough, as in Obsidian -- not GFM's single "~".
+	marked.use(obsidianStrikethrough);
 
 	const options = { ...marked.defaults, breaks: true };
 

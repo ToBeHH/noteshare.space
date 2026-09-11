@@ -75,8 +75,9 @@ describe("GET /api/note", () => {
     // at least one response should be 429
     expect(responseCodes).toContain(429);
 
-    // sleep for 100 ms to allow rate limiter to reset
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Wait out the rate limit window (GET_LIMIT_WINDOW_SECONDS in .env.test)
+    // so later tests in this file can make GET requests again.
+    await new Promise((resolve) => setTimeout(resolve, 2100));
   });
 });
 
@@ -172,8 +173,8 @@ describe("POST /api/note", () => {
       responseCodes.map((code) => code === 429 || code === 200)
     ).not.toContain(false);
 
-    // sleep for 100 ms to allow rate limiter to reset
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // Wait out the rate limit window (POST_LIMIT_WINDOW_SECONDS in .env.test).
+    await new Promise((resolve) => setTimeout(resolve, 2100));
   });
 });
 

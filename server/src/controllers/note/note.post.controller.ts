@@ -1,4 +1,4 @@
-import { EncryptedNote } from "@prisma/client";
+import { EncryptedNote } from "../../generated/prisma/client";
 import { NextFunction, Request, Response } from "express";
 import { createNote } from "../../db/note.dao";
 import { addDays, getConnectingIp, getNoteSize } from "../../util";

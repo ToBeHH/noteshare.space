@@ -10,10 +10,33 @@
 
 	let content: HTMLElement;
 
+	// The callout header is the first line of the first <p>, i.e. everything up to
+	// the first <br>. This reads that boundary out of innerHTML rather than relying
+	// on innerText turning <br> into "\n" -- real browsers do, but happy-dom (used
+	// by the tests) stopped doing so in v20, which silently swallowed the title.
+	function splitFirstLine(element: HTMLElement): { first: string; rest: string | null } {
+		const html = element.innerHTML;
+		const br = /<br\s*\/?>/i.exec(html);
+		if (!br) {
+			return { first: html, rest: null };
+		}
+		return {
+			first: html.substring(0, br.index),
+			rest: html.substring(br.index + br[0].length)
+		};
+	}
+
+	function htmlToText(html: string): string {
+		const scratch = document.createElement('div');
+		scratch.innerHTML = html;
+		return scratch.textContent ?? '';
+	}
+
 	$: if (content) {
 		const titleElement = content.getElementsByTagName('p')[0];
 		const preFilled = title != '';
-		const match = titleElement.innerText.split('\n')[0].match(/\[!(.+)\]([+-]?)(?:\s(.+))?/);
+		const { first, rest } = splitFirstLine(titleElement);
+		const match = htmlToText(first).match(/\[!(.+)\]([+-]?)(?:\s(.+))?/);
 		if (match && !preFilled) {
 			type = match[1]?.trim();
 			title = match[3]?.trim() ?? type[0].toUpperCase() + type.substring(1).toLowerCase();
@@ -24,12 +47,7 @@
 
 		// Remove title from content
 		if (!preFilled) {
-			const pos = titleElement.innerHTML.indexOf('<br>');
-			if (pos >= 0) {
-				titleElement.innerHTML = titleElement.innerHTML.substring(pos + 4);
-			} else {
-				titleElement.innerHTML = '';
-			}
+			titleElement.innerHTML = rest ?? '';
 		}
 		init = true;
 	}

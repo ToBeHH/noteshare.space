@@ -1,4 +1,4 @@
-import { EncryptedNote } from "@prisma/client";
+import { EncryptedNote } from "./generated/prisma/client";
 import { Request } from "express";
 
 export function addDays(date: Date, days: number): Date {
